@@ -6,10 +6,18 @@ data/*.csv
 data/*.json
 data/*.png
 
+# AI 配置（含 API Key）
+data/ai_config.json
+
 # 调试截图
 debug_*.png
 bilibili_data_export/debug_*.png
 bilibili_data_export/diag_*.png
+
+# 开发规划文件（本地）
+task_plan.md
+findings.md
+progress.md
 
 # Python
 __pycache__/

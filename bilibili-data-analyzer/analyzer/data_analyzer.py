@@ -160,6 +160,42 @@ class AnalysisResult:
         return "\n".join(lines)
 
     def to_json(self) -> dict:
+        videos_data = []
+        for v in self.videos:
+            videos_data.append({
+                "title": v.title,
+                "publish_time": v.publish_time,
+                "plays": v.plays,
+                "visitor_play_pct": v.visitor_play_pct,
+                "fan_view_rate": v.fan_view_rate,
+                "ctr_star": v.ctr_star,
+                "bounce_3s": v.bounce_3s,
+                "interact_rate": v.interact_rate,
+                "gain_fans": v.gain_fans,
+                "likes": v.likes,
+                "comments": v.comments,
+                "danmaku": v.danmaku,
+                "favorites": v.favorites,
+                "coins": v.coins,
+                "shares": v.shares,
+                "avg_progress": v.avg_progress,
+                "play_gain_fans_rate": v.play_gain_fans_rate,
+            })
+        
+        history_data = []
+        for h in self.history:
+            history_data.append({
+                "date": h.date,
+                "plays": h.plays,
+                "fans": h.fans,
+                "likes": h.likes,
+                "favorites": h.favorites,
+                "coins": h.coins,
+                "comments": h.comments,
+                "danmaku": h.danmaku,
+                "shares": h.shares,
+            })
+        
         return {
             "scores": {
                 "traffic_acquisition": self.scores.traffic_acquisition if self.scores else 0,
@@ -173,6 +209,8 @@ class AnalysisResult:
             "issues": self.issues,
             "suggestions": self.suggestions,
             "next_video_advice": self.next_video_advice,
+            "videos": videos_data,
+            "history": history_data,
             "markdown": self.to_markdown(),
         }
 

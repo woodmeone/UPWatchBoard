@@ -47,6 +47,11 @@ def get_analyzer():
     return DataAnalyzer()
 
 
+def get_ai_analyzer():
+    from analyzer.ai_analyzer import load_config, save_config, call_ai_api, build_analysis_prompt, get_providers
+    return load_config, save_config, call_ai_api, build_analysis_prompt, get_providers
+
+
 VIDEO_CSV = DATA_DIR / "近期稿件对比.csv"
 HISTORY_CSV = DATA_DIR / "历史累计数据趋势.csv"
 ANALYSIS_JSON = DATA_DIR / "analysis_result.json"
@@ -203,7 +208,29 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             self._handle_switch_account_status()
             return
 
+        if path == "/api/ai-config":
+            self._handle_ai_config_get()
+            return
+
+        if path == "/api/ai-providers":
+            self._handle_ai_providers()
+            return
+
         super().do_GET()
+
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        path = parsed.path
+
+        if path == "/api/ai-config":
+            self._handle_ai_config_post()
+            return
+
+        if path == "/api/ai-analyze":
+            self._handle_ai_analyze()
+            return
+
+        self.send_error(404, "Not Found")
 
     def _serve_dashboard(self):
         dashboard_path = ASSETS_DIR / "dashboard-template.html"
@@ -341,6 +368,79 @@ class DashboardHandler(http.server.SimpleHTTPRequestHandler):
             "ok": switch_account_status["ok"],
             "started_at": switch_account_status.get("started_at", ""),
         })
+
+    def _handle_ai_config_get(self):
+        try:
+            load_config, _, _, _, _ = get_ai_analyzer()
+            config = load_config()
+            config["api_key"] = "***" if config.get("api_key") else ""
+            self._send_json(200, {"ok": True, "config": config})
+        except Exception as e:
+            self._send_json(200, {"ok": False, "error": str(e)})
+
+    def _handle_ai_config_post(self):
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+            body = self.rfile.read(content_length).decode("utf-8")
+            data = json.loads(body)
+
+            _, save_config, _, _, _ = get_ai_analyzer()
+
+            config = {
+                "enabled": data.get("enabled", False),
+                "provider": data.get("provider", "openai"),
+                "base_url": data.get("base_url", ""),
+                "api_key": data.get("api_key", ""),
+                "model": data.get("model", ""),
+                "max_tokens": data.get("max_tokens", 2000),
+                "temperature": data.get("temperature", 0.7),
+            }
+
+            if save_config(config):
+                self._send_json(200, {"ok": True, "message": "配置已保存"})
+            else:
+                self._send_json(200, {"ok": False, "error": "保存配置失败"})
+        except Exception as e:
+            self._send_json(200, {"ok": False, "error": str(e)})
+
+    def _handle_ai_providers(self):
+        try:
+            _, _, _, _, get_providers = get_ai_analyzer()
+            providers = get_providers()
+            self._send_json(200, {"ok": True, "providers": providers})
+        except Exception as e:
+            self._send_json(200, {"ok": False, "error": str(e)})
+
+    def _handle_ai_analyze(self):
+        try:
+            load_config, _, call_ai_api, build_analysis_prompt, _ = get_ai_analyzer()
+            config = load_config()
+
+            if not config.get("enabled"):
+                self._send_json(200, {"ok": False, "error": "AI 分析未启用，请先在设置中配置并启用"})
+                return
+
+            if not ANALYSIS_JSON.exists():
+                self._send_json(200, {"ok": False, "error": "请先运行数据分析（点击「重新分析」按钮）"})
+                return
+
+            with open(ANALYSIS_JSON, "r", encoding="utf-8") as f:
+                analysis_data = json.load(f)
+
+            prompt = build_analysis_prompt(analysis_data)
+            result = call_ai_api(prompt, config)
+
+            if result["ok"]:
+                self._send_json(200, {
+                    "ok": True,
+                    "content": result["content"],
+                    "model": result.get("model", ""),
+                    "usage": result.get("usage", {})
+                })
+            else:
+                self._send_json(200, {"ok": False, "error": result["error"]})
+        except Exception as e:
+            self._send_json(200, {"ok": False, "error": str(e)})
 
     def _send_response(self, code, content, content_type):
         data = content if isinstance(content, bytes) else content.encode("utf-8")
