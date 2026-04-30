@@ -111,6 +111,7 @@ class AnalysisResult:
     issues: list = field(default_factory=list)
     suggestions: list = field(default_factory=list)
     next_video_advice: list = field(default_factory=list)
+    history_insights: list = field(default_factory=list)
 
     def to_markdown(self) -> str:
         lines = []
@@ -126,6 +127,24 @@ class AnalysisResult:
         total_plays = sum(v.plays for v in self.videos)
         total_gain = sum(v.gain_fans for v in self.videos)
         lines.append(f"分析 {len(self.videos)} 条视频，总播放 {_format_num(total_plays)}，净涨粉 +{_format_num(total_gain)}")
+
+        if self.history:
+            days = len(self.history)
+            first = self.history[0]
+            last = self.history[-1]
+            fans_first = first.fans
+            fans_last = last.fans
+            fans_growth = fans_last - fans_first
+            plays_first = first.plays
+            plays_last = last.plays
+            plays_growth = plays_last - plays_first
+            lines.append(f"历史数据：{days} 天，粉丝从 {_format_num(fans_first)} → {_format_num(fans_last)}（+{_format_num(fans_growth)}），播放量从 {_format_num(plays_first)} → {_format_num(plays_last)}（+{_format_num(plays_growth)}）")
+
+        if self.history_insights:
+            lines.append("")
+            lines.append("## 📈 历史趋势洞察")
+            for insight in self.history_insights:
+                lines.append(f"- {insight}")
 
         if self.highlights:
             lines.append("")
@@ -209,6 +228,7 @@ class AnalysisResult:
             "issues": self.issues,
             "suggestions": self.suggestions,
             "next_video_advice": self.next_video_advice,
+            "history_insights": self.history_insights,
             "videos": videos_data,
             "history": history_data,
             "markdown": self.to_markdown(),
@@ -316,17 +336,18 @@ class DataAnalyzer:
             return result
 
         result = AnalysisResult(videos=videos, history=history)
-        result.scores = self._calc_health_scores(videos)
+        result.scores = self._calc_health_scores(videos, history)
         result.patterns = self._detect_patterns(videos, history)
+        result.history_insights = self._analyze_history_trends(videos, history)
         result.highlights = self._find_highlights(videos)
         result.issues = self._find_issues(videos)
-        result.suggestions = self._generate_suggestions(videos, result.scores, result.patterns, result.issues)
-        result.next_video_advice = self._generate_next_video_advice(videos, result.scores, result.patterns)
+        result.suggestions = self._generate_suggestions(videos, result.scores, result.patterns, result.issues, result.history_insights)
+        result.next_video_advice = self._generate_next_video_advice(videos, result.scores, result.patterns, result.history_insights)
         return result
 
     # ---- 四维度评分 ----
 
-    def _calc_health_scores(self, videos: list) -> HealthScores:
+    def _calc_health_scores(self, videos: list, history: list = None) -> HealthScores:
         n = len(videos)
 
         # === 维度1：流量获取能力 (25%) ===
@@ -355,7 +376,16 @@ class DataAnalyzer:
         else:
             traffic += 10
         traffic += avg_visitor * 0.5
-        traffic = min(100, traffic)
+        traffic = min(100, max(0, traffic))
+
+        if history and len(history) >= 7:
+            recent_fans = [h.fans for h in history[-7:]]
+            fans_trend = _calc_trend(recent_fans)
+            if fans_trend > 0:
+                traffic += 10
+            elif fans_trend < 0:
+                traffic -= 10
+        traffic = min(100, max(0, traffic))
 
         # === 维度2：内容吸引力 (25%) ===
         ctr_scores = []
@@ -484,7 +514,99 @@ class DataAnalyzer:
             if p not in seen:
                 seen.add(p)
                 unique.append(p)
-        return unique[:6]
+
+        if history and len(history) >= 7:
+            all_plays = [h.plays for h in history]
+            plays_trend = _calc_trend(all_plays[-7:])
+            if plays_trend < 0:
+                unique.append("近7天播放量呈下降趋势，需关注流量获取渠道变化")
+            elif plays_trend > 0:
+                unique.append("近7天播放量呈上升趋势，当前内容策略效果良好")
+
+            all_fans = [h.fans for h in history]
+            fans_growth = [all_fans[i+1] - all_fans[i] for i in range(len(all_fans)-1)]
+            recent_growth = fans_growth[-7:] if len(fans_growth) >= 7 else fans_growth
+            avg_daily_gain = sum(recent_growth) / len(recent_growth)
+            if avg_daily_gain <= 0:
+                unique.append(f"近7天日均涨粉{avg_daily_gain:.0f}人，粉丝增长停滞，需加强涨粉引导")
+            elif avg_daily_gain < 10:
+                unique.append(f"近7天日均涨粉{avg_daily_gain:.1f}人，增速较慢，建议优化涨粉策略")
+
+            recent_interact = [h.likes + h.comments + h.danmaku + h.favorites + h.coins + h.shares for h in history[-7:]]
+            interact_trend = _calc_trend(recent_interact)
+            if interact_trend < 0:
+                unique.append("近7天互动总量呈下降趋势，观众参与度减弱，建议增加互动引导")
+
+            if len(history) >= 30:
+                plays_30d = [h.plays for h in history[-30:]]
+                max_play = max(plays_30d)
+                min_play = min(plays_30d)
+                if max_play > 0 and (max_play - min_play) / max_play > 0.5:
+                    unique.append(f"近30天播放量波动较大（{min_play}~{max_play}），数据稳定性不足")
+
+        return unique[:8]
+
+    # ---- 历史趋势分析 ----
+
+    def _analyze_history_trends(self, videos: list, history: list) -> list:
+        insights = []
+        if not history or len(history) < 3:
+            insights.append("历史数据不足（需至少3天），无法生成趋势分析")
+            return insights
+
+        days = len(history)
+        first = history[0]
+        last = history[-1]
+        
+        fans_growth = last.fans - first.fans
+        fans_growth_rate = (fans_growth / first.fans * 100) if first.fans > 0 else 0
+        avg_daily_fans = fans_growth / days
+        insights.append(f"{days}天内粉丝从{_format_num(first.fans)}增长至{_format_num(last.fans)}（+{_format_num(fans_growth)}，增长率{fans_growth_rate:.1f}%），日均涨粉{avg_daily_fans:.1f}人")
+
+        all_plays = [h.plays for h in history]
+        avg_plays = sum(all_plays) / days
+        plays_trend = _calc_trend(all_plays[-14:]) if days >= 14 else _calc_trend(all_plays)
+        if plays_trend > 0:
+            insights.append(f"整体播放量呈上升趋势，日均播放{_format_num(int(avg_plays))}，内容策略正向发展")
+        elif plays_trend < 0:
+            insights.append(f"整体播放量呈下降趋势，日均播放{_format_num(int(avg_plays))}，需调整选题或发布时间策略")
+        else:
+            insights.append(f"整体播放量基本稳定，日均播放{_format_num(int(avg_plays))}，波动较小")
+
+        if days >= 7:
+            all_fans = [h.fans for h in history]
+            fans_growth_list = [all_fans[i+1] - all_fans[i] for i in range(len(all_fans)-1)]
+            recent_7_growth = sum(fans_growth_list[-7:]) if len(fans_growth_list) >= 7 else sum(fans_growth_list)
+            if len(history) >= 14:
+                prev_7_growth = sum(fans_growth_list[-14:-7]) if len(fans_growth_list) >= 14 else 0
+                if prev_7_growth > 0 and recent_7_growth > prev_7_growth * 1.5:
+                    insights.append(f"近7天涨粉量({recent_7_growth})较前7天({prev_7_growth})显著提升，近期内容涨粉效果增强")
+                elif prev_7_growth > 0 and recent_7_growth < prev_7_growth * 0.5:
+                    insights.append(f"近7天涨粉量({recent_7_growth})较前7天({prev_7_growth})明显下降，需关注近期内容吸引力")
+
+            all_likes = [h.likes for h in history]
+            all_comments = [h.comments for h in history]
+            recent_7_likes = sum(all_likes[-7:]) if len(all_likes) >= 7 else sum(all_likes)
+            recent_7_comments = sum(all_comments[-7:]) if len(all_comments) >= 7 else sum(all_comments)
+            insights.append(f"近7天累计点赞{_format_num(recent_7_likes)}、评论{_format_num(recent_7_comments)}，互动活跃度保持稳定")
+
+        if days >= 30:
+            all_plays_30 = all_plays[-30:]
+            max_play = max(all_plays_30)
+            max_idx = all_plays_30.index(max_play)
+            avg_play_30 = sum(all_plays_30) / 30
+            insights.append(f"近30天最高单日播放{_format_num(max_play)}（第{max_idx+1}天），为日均的{max_play/avg_play_30:.1f}倍")
+
+            fans_30 = [h.fans for h in history[-30:]]
+            fans_start_30 = fans_30[0]
+            fans_end_30 = fans_30[-1]
+            fans_30_growth = fans_end_30 - fans_start_30
+            if fans_30_growth > 100:
+                insights.append(f"近30天粉丝净增{_format_num(fans_30_growth)}，涨粉势头良好")
+            elif fans_30_growth > 0:
+                insights.append(f"近30天粉丝净增{_format_num(fans_30_growth)}，增长稳健但可加速")
+
+        return insights[:6]
 
     # ---- 亮点 ----
 
@@ -543,7 +665,7 @@ class DataAnalyzer:
 
     # ---- 建议生成 ----
 
-    def _generate_suggestions(self, videos: list, scores: HealthScores, patterns: list, issues: list) -> list:
+    def _generate_suggestions(self, videos: list, scores: HealthScores, patterns: list, issues: list, history_insights: list = None) -> list:
         suggestions = []
 
         if scores.traffic_acquisition < 50:
@@ -570,11 +692,19 @@ class DataAnalyzer:
         if visitor_high:
             suggestions.append("**发布策略优化**：游客占比过高，建议明确账号定位，深耕垂直领域；保持稳定更新频率（周更或双周更），培养粉丝观看习惯")
 
+        if history_insights:
+            has_decline = any("下降" in insight or "停滞" in insight for insight in history_insights)
+            has_slow_growth = any("增速较慢" in insight or "增长稳健但" in insight for insight in history_insights)
+            if has_decline:
+                suggestions.append("**历史趋势应对**：数据显示近期有下降趋势，建议增加发布频率到周更2-3次，尝试热点话题和系列化内容提升数据回升")
+            if has_slow_growth:
+                suggestions.append("**加速增长策略**：当前增长稳健但可加速，建议尝试跨平台引流（微信公众号、小红书）、积极参与B站话题活动增加曝光")
+
         return suggestions
 
     # ---- 下期建议 ----
 
-    def _generate_next_video_advice(self, videos: list, scores: HealthScores, patterns: list) -> list:
+    def _generate_next_video_advice(self, videos: list, scores: HealthScores, patterns: list, history_insights: list = None) -> list:
         advice = []
 
         if not videos:

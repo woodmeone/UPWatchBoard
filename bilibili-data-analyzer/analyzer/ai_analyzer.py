@@ -525,6 +525,7 @@ def build_analysis_prompt(analysis_data: dict) -> str:
     issues = analysis_data.get("issues", [])
     suggestions = analysis_data.get("suggestions", [])
     next_video_advice = analysis_data.get("next_video_advice", [])
+    history_insights = analysis_data.get("history_insights", [])
     
     videos = analysis_data.get("videos", [])
     history = analysis_data.get("history", [])
@@ -572,19 +573,23 @@ def build_analysis_prompt(analysis_data: dict) -> str:
 
 {format_history_data_for_prompt(history)}
 
-## 六、系统识别的数据模式
+## 六、系统历史趋势洞察
+
+{chr(10).join(f'- {h}' for h in history_insights) if history_insights else '- 暂无历史趋势数据'}
+
+## 七、系统识别的数据模式
 
 {chr(10).join(f'- {p}' for p in patterns) if patterns else '- 暂无明显数据模式'}
 
-## 七、亮点分析
+## 八、亮点分析
 
 {chr(10).join(f'- {h}' for h in highlights) if highlights else '- 暂无明显亮点'}
 
-## 八、问题诊断
+## 九、问题诊断
 
 {chr(10).join(f'- {i}' for i in issues) if issues else '- 暂无明显问题'}
 
-## 九、基础优化建议
+## 十、基础优化建议
 
 {chr(10).join(f'{idx+1}. {s}' for idx, s in enumerate(suggestions)) if suggestions else '- 暂无建议'}
 
