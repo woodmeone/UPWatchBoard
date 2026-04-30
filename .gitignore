@@ -6,6 +6,11 @@ data/*.csv
 data/*.json
 data/*.png
 
+# 调试截图
+debug_*.png
+bilibili_data_export/debug_*.png
+bilibili_data_export/diag_*.png
+
 # Python
 __pycache__/
 *.py[cod]
