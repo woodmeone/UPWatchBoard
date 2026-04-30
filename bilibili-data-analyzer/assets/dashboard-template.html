@@ -1,0 +1,1817 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>B站数据分析看板</title>
+<script>
+(function() {
+  var scriptsLoaded = 0;
+  var scriptsNeeded = 2;
+
+  window.onScriptsReady = function() {};
+  window._markScriptLoaded = function() {
+    scriptsLoaded++;
+    var el = document.getElementById('loader-text');
+    if (el) el.textContent = '正在加载依赖... (' + scriptsLoaded + '/' + scriptsNeeded + ')';
+    if (scriptsLoaded >= scriptsNeeded) {
+      window.onScriptsReady();
+    }
+  };
+
+  function tryLoad(primary, fallbackArray, idx) {
+    var s = document.createElement('script');
+    s.src = (idx === 0) ? primary : fallbackArray[idx - 1];
+    s.onload = window._markScriptLoaded;
+    s.onerror = function() {
+      if (idx < fallbackArray.length) {
+        tryLoad(primary, fallbackArray, idx + 1);
+      } else {
+        var el2 = document.getElementById('loader-text');
+        if (el2) el2.textContent = 'CDN加载失败，请检查网络连接';
+      }
+    };
+    document.head.appendChild(s);
+  }
+
+  tryLoad(
+    'https://cdn.bootcdn.net/ajax/libs/echarts/5.5.0/echarts.min.js',
+    ['https://unpkg.com/echarts@5.5.0/dist/echarts.min.js', 'https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js'],
+    0
+  );
+  tryLoad(
+    'https://cdn.bootcdn.net/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
+    ['https://unpkg.com/html2canvas@1.4.1/dist/html2canvas.min.js', 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js'],
+    0
+  );
+})();
+</script>
+<style>
+/* ========== CSS Variables & Reset ========== */
+:root {
+  --bg-primary: #0d1117;
+  --bg-secondary: #161b22;
+  --bg-card: #1c2333;
+  --bg-card-hover: #222d3f;
+  --border-color: #30363d;
+  --text-primary: #e6edf3;
+  --text-secondary: #8b949e;
+  --text-muted: #6e7681;
+  --accent: #FB7299;
+  --accent-light: #fc9db8;
+  --accent-dark: #e05a82;
+  --accent-glow: rgba(251, 114, 153, 0.3);
+  --green: #3fb950;
+  --green-glow: rgba(63, 185, 80, 0.4);
+  --blue: #58a6ff;
+  --purple: #bc8cff;
+  --orange: #f0883e;
+  --cyan: #39d2c0;
+  --yellow: #e3b341;
+  --red: #f85149;
+  --radius: 12px;
+  --radius-sm: 8px;
+  --shadow: 0 2px 12px rgba(0,0,0,0.3);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.4);
+  --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+html {
+  scroll-behavior: smooth;
+  font-size: 14px;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* ========== Loading Animation ========== */
+#loading-overlay {
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: var(--bg-primary);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+  transition: opacity 0.6s ease, visibility 0.6s ease;
+}
+
+#loading-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+}
+
+.loader-ring {
+  width: 60px; height: 60px;
+  border: 3px solid var(--border-color);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+.loader-text {
+  margin-top: 16px;
+  color: var(--text-secondary);
+  font-size: 14px;
+  letter-spacing: 1px;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ========== Scrollbar ========== */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-primary); }
+::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ========== Main Container ========== */
+.dashboard-container {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 24px 60px;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.8s ease, transform 0.8s ease;
+}
+
+.dashboard-container.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ========== Header ========== */
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  margin-bottom: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.logo {
+  font-size: 22px;
+  font-weight: 700;
+  background: linear-gradient(135deg, var(--accent), var(--accent-light));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  background: rgba(63, 185, 80, 0.1);
+  border: 1px solid rgba(63, 185, 80, 0.3);
+  border-radius: 20px;
+  font-size: 12px;
+  color: var(--green);
+}
+
+.status-dot {
+  width: 8px; height: 8px;
+  background: var(--green);
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { box-shadow: 0 0 0 0 var(--green-glow); }
+  50% { box-shadow: 0 0 0 6px transparent; }
+}
+
+.refresh-info {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.countdown {
+  color: var(--accent);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* ========== Buttons ========== */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-card);
+  color: var(--text-primary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: var(--transition);
+  white-space: nowrap;
+}
+
+.btn:hover {
+  border-color: var(--accent);
+  background: var(--bg-card-hover);
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  border-color: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+
+.btn-primary:hover {
+  background: linear-gradient(135deg, var(--accent-light), var(--accent));
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+
+.switch-btn {
+  border-color: var(--orange);
+  color: var(--orange);
+}
+
+.switch-btn:hover {
+  background: var(--orange);
+  color: #fff;
+  box-shadow: 0 0 12px rgba(240,136,62,0.3);
+}
+
+.btn svg { width: 16px; height: 16px; }
+
+.hidden-input { display: none; }
+
+/* ========== Overview Cards ========== */
+.overview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+  margin-bottom: 32px;
+}
+
+.overview-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: var(--transition);
+  position: relative;
+  overflow: hidden;
+  opacity: 0;
+  transform: translateY(16px);
+  animation: fadeInUp 0.5s ease forwards;
+}
+
+.overview-card:nth-child(1) { animation-delay: 0.1s; }
+.overview-card:nth-child(2) { animation-delay: 0.2s; }
+.overview-card:nth-child(3) { animation-delay: 0.3s; }
+.overview-card:nth-child(4) { animation-delay: 0.4s; }
+.overview-card:nth-child(5) { animation-delay: 0.5s; }
+.overview-card:nth-child(6) { animation-delay: 0.6s; }
+
+@keyframes fadeInUp {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.overview-card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-lg);
+}
+
+.overview-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
+  opacity: 0;
+  transition: opacity 0.3s;
+}
+
+.overview-card:hover::before { opacity: 1; }
+
+.card-icon {
+  width: 40px; height: 40px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+
+.card-icon.pink { background: rgba(251,114,153,0.15); color: var(--accent); }
+.card-icon.blue { background: rgba(88,166,255,0.15); color: var(--blue); }
+.card-icon.purple { background: rgba(188,140,255,0.15); color: var(--purple); }
+.card-icon.green { background: rgba(63,185,80,0.15); color: var(--green); }
+.card-icon.orange { background: rgba(240,136,62,0.15); color: var(--orange); }
+.card-icon.cyan { background: rgba(57,210,192,0.15); color: var(--cyan); }
+
+.card-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+
+.card-value {
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.card-value.accent { color: var(--accent); }
+.card-value.green { color: var(--green); }
+.card-value.blue { color: var(--blue); }
+.card-value.purple { color: var(--purple); }
+.card-value.orange { color: var(--orange); }
+.card-value.cyan { color: var(--cyan); }
+
+/* ========== Section ========== */
+.section {
+  margin-bottom: 36px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.section-icon {
+  width: 28px; height: 28px;
+  border-radius: 6px;
+  background: linear-gradient(135deg, var(--accent), var(--accent-dark));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: #fff;
+}
+
+.section-title {
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* ========== Chart Grid ========== */
+.chart-grid-2 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(480px, 1fr));
+  gap: 20px;
+}
+
+.chart-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+  gap: 20px;
+}
+
+.chart-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 20px;
+  transition: var(--transition);
+}
+
+.chart-card:hover {
+  border-color: rgba(251,114,153,0.3);
+  box-shadow: var(--shadow);
+}
+
+.chart-card.full-width {
+  grid-column: 1 / -1;
+}
+
+.chart-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.chart-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+.chart-container {
+  width: 100%;
+  height: 320px;
+}
+
+.chart-container.tall { height: 400px; }
+
+/* ========== AI Analysis Panel ========== */
+.ai-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius);
+  padding: 24px;
+}
+
+.ai-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.ai-panel-title {
+  font-size: 16px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-badge {
+  padding: 2px 8px;
+  background: linear-gradient(135deg, var(--accent), var(--purple));
+  border-radius: 4px;
+  font-size: 10px;
+  color: #fff;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.ai-input-area {
+  width: 100%;
+  min-height: 120px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  padding: 16px;
+  color: var(--text-primary);
+  font-size: 14px;
+  line-height: 1.8;
+  resize: vertical;
+  transition: var(--transition);
+  font-family: inherit;
+}
+
+.ai-input-area:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.ai-input-area::placeholder {
+  color: var(--text-muted);
+}
+
+.ai-display {
+  margin-top: 16px;
+  padding: 20px;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  display: none;
+}
+
+.ai-display.active { display: block; }
+
+.ai-display h3 {
+  color: var(--accent);
+  font-size: 15px;
+  margin: 12px 0 8px;
+}
+
+.ai-display h3:first-child { margin-top: 0; }
+
+.ai-display strong { color: var(--accent-light); }
+
+.ai-display ul, .ai-display ol {
+  padding-left: 20px;
+  margin: 8px 0;
+}
+
+.ai-display li {
+  margin: 4px 0;
+  color: var(--text-secondary);
+}
+
+.ai-display li::marker { color: var(--accent); }
+
+.ai-display p {
+  margin: 8px 0;
+  color: var(--text-secondary);
+}
+
+.ai-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+  flex-wrap: wrap;
+}
+
+/* ========== Footer ========== */
+.footer {
+  text-align: center;
+  padding: 24px 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  border-top: 1px solid var(--border-color);
+  margin-top: 20px;
+}
+
+/* ========== Toast ========== */
+.toast {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  padding: 12px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  font-size: 13px;
+  box-shadow: var(--shadow-lg);
+  z-index: 9999;
+  transform: translateX(120%);
+  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toast.show { transform: translateX(0); }
+.toast.success { border-left: 3px solid var(--green); }
+.toast.error { border-left: 3px solid var(--red); }
+.toast.info { border-left: 3px solid var(--blue); }
+
+/* ========== Responsive ========== */
+@media (max-width: 768px) {
+  .dashboard-container { padding: 12px 12px 40px; }
+  .header { flex-direction: column; align-items: flex-start; }
+  .header-right { width: 100%; }
+  .overview-grid { grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .chart-grid-2, .chart-grid-3 { grid-template-columns: 1fr; }
+  .card-value { font-size: 20px; }
+  .chart-container { height: 280px; }
+  .chart-container.tall { height: 320px; }
+}
+
+@media (max-width: 480px) {
+  .overview-grid { grid-template-columns: 1fr; }
+  .btn { padding: 6px 12px; font-size: 12px; }
+}
+
+/* ========== Print / Export ========== */
+.exporting .header-right,
+.exporting .ai-input-area,
+.exporting .ai-actions { display: none !important; }
+</style>
+</head>
+<body>
+
+<!-- Loading Overlay -->
+<div id="loading-overlay">
+  <div class="loader-ring"></div>
+  <div class="loader-text">正在加载数据看板...</div>
+</div>
+
+<!-- Toast -->
+<div id="toast" class="toast"></div>
+
+<!-- Dashboard -->
+<div class="dashboard-container" id="dashboard">
+
+  <!-- Header -->
+  <header class="header">
+    <div class="header-left">
+      <div class="logo">B站数据分析看板</div>
+      <div class="status-badge">
+        <span class="status-dot"></span>
+        <span>实时监控中</span>
+      </div>
+      <div class="refresh-info">
+        上次刷新: <span id="last-refresh">--</span>
+        &nbsp;|&nbsp; 下次刷新: <span class="countdown" id="countdown">60s</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn" onclick="refreshData()" id="btn-refresh">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 11-2.12-9.36L23 10"/></svg>
+        刷新数据
+      </button>
+      <button class="btn" onclick="triggerDownload()" id="btn-download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        下载数据
+      </button>
+      <button class="btn switch-btn" onclick="switchAccount()" id="btn-switch" title="切换B站账号，重新导出新账号数据">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/></svg>
+        切换账号
+      </button>
+      <input type="file" id="csv-videos" class="hidden-input" accept=".csv" />
+      <button class="btn" onclick="document.getElementById('csv-videos').click()" title="手动上传近期稿件对比CSV">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        手动上传
+      </button>
+      <button class="btn btn-primary" onclick="exportDashboard()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+        导出图片
+      </button>
+    </div>
+  </header>
+
+  <!-- Overview Cards -->
+  <div class="overview-grid" id="overview-grid">
+    <div class="overview-card">
+      <div class="card-icon pink">&#9654;</div>
+      <div class="card-label">总播放量</div>
+      <div class="card-value accent" id="ov-plays">--</div>
+    </div>
+    <div class="overview-card">
+      <div class="card-icon blue">&#9734;</div>
+      <div class="card-label">总粉丝数</div>
+      <div class="card-value blue" id="ov-fans">--</div>
+    </div>
+    <div class="overview-card">
+      <div class="card-icon purple">&#9881;</div>
+      <div class="card-label">视频数量</div>
+      <div class="card-value purple" id="ov-count">--</div>
+    </div>
+    <div class="overview-card">
+      <div class="card-icon green">&#9829;</div>
+      <div class="card-label">平均互动率</div>
+      <div class="card-value green" id="ov-interact">--</div>
+    </div>
+    <div class="overview-card">
+      <div class="card-icon orange">&#9888;</div>
+      <div class="card-label">平均跳出率</div>
+      <div class="card-value orange" id="ov-bounce">--</div>
+    </div>
+    <div class="overview-card">
+      <div class="card-icon cyan">&#8593;</div>
+      <div class="card-label">净涨粉量</div>
+      <div class="card-value cyan" id="ov-gain">--</div>
+    </div>
+  </div>
+
+  <!-- Section 1: Recent Videos -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">&#9670;</div>
+      <div class="section-title">近期稿件分析</div>
+    </div>
+    <div class="chart-grid-2">
+      <div class="chart-card">
+        <div class="chart-title">播放量趋势</div>
+        <div class="chart-container" id="chart-plays-trend"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">游客播放占比 vs 粉丝观看率</div>
+        <div class="chart-container" id="chart-audience"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">封标点击率评分</div>
+        <div class="chart-container" id="chart-ctr"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">3秒跳出率 vs 平均播放进度</div>
+        <div class="chart-container" id="chart-bounce-progress"></div>
+      </div>
+      <div class="chart-card full-width">
+        <div class="chart-title">互动六维数据</div>
+        <div class="chart-container" id="chart-interaction"></div>
+      </div>
+      <div class="chart-card full-width">
+        <div class="chart-title">流量漏斗分析（聚合）</div>
+        <div class="chart-container tall" id="chart-funnel"></div>
+      </div>
+      <div class="chart-card full-width">
+        <div class="chart-title">逐视频漏斗对比</div>
+        <div class="chart-container tall" id="chart-video-funnel"></div>
+        <div style="overflow-x:auto;margin-top:12px;">
+          <table id="table-video-funnel" style="width:100%;border-collapse:collapse;font-size:12px;color:var(--text-secondary);">
+            <thead><tr style="border-bottom:1px solid var(--border-color);text-align:left;">
+              <th style="padding:6px 10px;">视频</th>
+              <th style="padding:6px 10px;">播放量</th>
+              <th style="padding:6px 10px;">3秒留存</th>
+              <th style="padding:6px 10px;">播放进度</th>
+              <th style="padding:6px 10px;">互动率</th>
+              <th style="padding:6px 10px;">涨粉</th>
+              <th style="padding:6px 10px;">评分</th>
+            </tr></thead>
+            <tbody id="tbody-video-funnel"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 2: Historical Trends -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">&#9650;</div>
+      <div class="section-title">历史趋势</div>
+    </div>
+    <div class="chart-grid-2">
+      <div class="chart-card full-width">
+        <div class="chart-title">播放量 & 粉丝增长趋势</div>
+        <div class="chart-container" id="chart-history-plays-fans"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">每日新增互动</div>
+        <div class="chart-container" id="chart-daily-add"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-title">互动数据多线趋势</div>
+        <div class="chart-container" id="chart-interaction-trend"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Section 3: AI Analysis -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-icon">&#10022;</div>
+      <div class="section-title">AI 分析建议</div>
+    </div>
+    <div class="ai-panel">
+      <div class="ai-panel-header">
+        <div class="ai-panel-title">
+          <span class="ai-badge">AI</span>
+          智能数据分析
+          <span id="ai-status" style="font-size:12px;color:var(--text-muted);margin-left:12px;">等待数据加载...</span>
+        </div>
+        <div style="display:flex;gap:8px;">
+          <button class="btn" onclick="runAnalysis()" id="btn-analyze">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="16" height="16"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            重新分析
+          </button>
+          <button class="btn" onclick="pasteFromClipboard()">粘贴建议</button>
+        </div>
+      </div>
+      <textarea class="ai-input-area" id="ai-input" placeholder="你也可以在此手动粘贴AI分析建议，然后点击下方「渲染分析建议」。支持Markdown格式。"></textarea>
+      <div class="ai-actions">
+        <button class="btn btn-primary" onclick="renderAIAdvice()">渲染手动建议</button>
+        <button class="btn" onclick="clearAIAdvice()">清空</button>
+      </div>
+      <div class="ai-display active" id="ai-display">
+        <p style="color:var(--text-muted);">正在加载智能分析...</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="footer">
+    B站数据分析看板 &mdash; 所有数据均为本地处理，不会上传至任何服务器
+  </footer>
+
+</div>
+
+<script>
+// ============================================================
+//  GLOBAL STATE
+// ============================================================
+let videoData = [];
+let historyData = [];
+let charts = {};
+let refreshTimer = null;
+let countdownValue = 60;
+let isAutoMode = true;
+
+// ============================================================
+//  DEFAULT DEMO DATA (ALL FICTIONAL)
+// ============================================================
+const DEFAULT_VIDEO_CSV = `视频标题,发布时间,播放量,游客播放占比,粉丝观看率,封标点击率,3秒跳出率,互动率,涨粉量,点赞量,评论量,弹幕量,收藏量,投币量,转发量,平均播放进度
+视频A-科技测评,2026年03月01日 12:00:00,8500,88.5%,3.2%,4.2星,25.3%,6.8%,45,320,28,15,180,42,18,38.5%
+视频B-生活vlog,2026年03月05日 18:30:00,5200,91.2%,2.8%,3.8星,30.1%,5.2%,22,180,15,8,95,25,12,32.1%
+视频C-教程分享,2026年03月10日 10:00:00,12300,85.3%,4.5%,4.5星,18.7%,9.5%,128,580,45,22,420,85,35,52.3%
+视频D-美食制作,2026年03月15日 20:00:00,3800,93.1%,2.1%,3.5星,35.8%,4.1%,8,95,12,5,42,15,6,28.7%
+视频E-游戏实况,2026年03月20日 22:00:00,9100,87.6%,3.8%,4.0星,22.4%,7.2%,56,280,32,18,150,38,22,41.2%`;
+
+function generateDefaultHistory() {
+  const rows = ['时间,播放量,累计粉丝,点赞,收藏,硬币,评论,弹幕,分享'];
+  let fans = 15200;
+  for (let i = 29; i >= 0; i--) {
+    const d = new Date(2026, 2, 22);
+    d.setDate(d.getDate() - i);
+    const dateStr = `${d.getFullYear()}年${String(d.getMonth()+1).padStart(2,'0')}月${String(d.getDate()).padStart(2,'0')}日`;
+    const plays = Math.floor(3000 + Math.random() * 8000 + (30 - i) * 80);
+    fans += Math.floor(20 + Math.random() * 60);
+    const likes = Math.floor(100 + Math.random() * 400);
+    const favs = Math.floor(30 + Math.random() * 150);
+    const coins = Math.floor(20 + Math.random() * 80);
+    const comments = Math.floor(10 + Math.random() * 60);
+    const danmaku = Math.floor(5 + Math.random() * 40);
+    const shares = Math.floor(3 + Math.random() * 20);
+    rows.push(`${dateStr},${plays},${fans},${likes},${favs},${coins},${comments},${danmaku},${shares}`);
+  }
+  return rows.join('\n');
+}
+
+const DEFAULT_HISTORY_CSV = generateDefaultHistory();
+
+// ============================================================
+//  CSV PARSER
+// ============================================================
+function parseCSV(text) {
+  const lines = text.trim().split('\n').map(l => l.trim()).filter(l => l);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map(h => h.trim());
+  const data = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = lines[i].split(',').map(v => v.trim());
+    if (values.length >= headers.length) {
+      const row = {};
+      headers.forEach((h, idx) => { row[h] = values[idx]; });
+      data.push(row);
+    }
+  }
+  return data;
+}
+
+function pctToNum(s) {
+  if (typeof s === 'number') return s;
+  return parseFloat(String(s).replace('%', '')) || 0;
+}
+
+function num(s) {
+  return parseInt(String(s).replace(/,/g, ''), 10) || 0;
+}
+
+function starToNum(s) {
+  if (typeof s === 'number') return s;
+  return parseFloat(String(s).replace('星', '')) || 0;
+}
+
+function abbrTitle(title, maxLen) {
+  maxLen = maxLen || 8;
+  if (title.length <= maxLen) return title;
+  return title.substring(0, maxLen) + '...';
+}
+
+function formatNum(n) {
+  if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+  return n.toLocaleString('zh-CN');
+}
+
+// ============================================================
+//  TOAST
+// ============================================================
+function showToast(msg, type) {
+  type = type || 'info';
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = 'toast ' + type + ' show';
+  setTimeout(() => { el.classList.remove('show'); }, 3000);
+}
+
+// ============================================================
+//  OVERVIEW CARDS
+// ============================================================
+function updateOverview() {
+  const totalPlays = videoData.reduce((s, r) => s + num(r['播放量']), 0);
+  const totalFans = videoData.reduce((s, r) => s + num(r['涨粉量']), 0);
+  const count = videoData.length;
+  const avgInteract = count > 0 ? (videoData.reduce((s, r) => s + pctToNum(r['互动率']), 0) / count).toFixed(1) : 0;
+  const avgBounce = count > 0 ? (videoData.reduce((s, r) => s + pctToNum(r['3秒跳出率']), 0) / count).toFixed(1) : 0;
+
+  // Get latest fans from history if available
+  let latestFans = totalFans;
+  if (historyData.length > 0) {
+    const lastRow = historyData[historyData.length - 1];
+    latestFans = num(lastRow['累计粉丝']);
+  }
+
+  document.getElementById('ov-plays').textContent = formatNum(totalPlays);
+  document.getElementById('ov-fans').textContent = formatNum(latestFans);
+  document.getElementById('ov-count').textContent = count;
+  document.getElementById('ov-interact').textContent = avgInteract + '%';
+  document.getElementById('ov-bounce').textContent = avgBounce + '%';
+  document.getElementById('ov-gain').textContent = '+' + formatNum(totalFans);
+}
+
+// ============================================================
+//  CHART THEME HELPERS
+// ============================================================
+const COLORS = {
+  pink: '#FB7299',
+  pinkLight: '#fc9db8',
+  blue: '#58a6ff',
+  purple: '#bc8cff',
+  green: '#3fb950',
+  orange: '#f0883e',
+  cyan: '#39d2c0',
+  yellow: '#e3b341',
+  red: '#f85149',
+  text: '#e6edf3',
+  textSec: '#8b949e',
+  line: '#30363d',
+  bg: '#1c2333'
+};
+
+function baseOption() {
+  return {
+    backgroundColor: 'transparent',
+    textStyle: { color: COLORS.textSec, fontFamily: 'inherit' },
+    tooltip: {
+      trigger: 'axis',
+      backgroundColor: 'rgba(22,27,34,0.95)',
+      borderColor: COLORS.line,
+      textStyle: { color: COLORS.text, fontSize: 12 },
+      axisPointer: { lineStyle: { color: COLORS.pink + '40' } }
+    },
+    grid: { left: 50, right: 30, top: 40, bottom: 50, containLabel: false },
+    legend: { textStyle: { color: COLORS.textSec, fontSize: 11 }, top: 4, right: 10 },
+    xAxis: {
+      axisLine: { lineStyle: { color: COLORS.line } },
+      axisTick: { show: false },
+      axisLabel: { color: COLORS.textSec, fontSize: 11, rotate: 20 }
+    },
+    yAxis: {
+      axisLine: { show: false },
+      splitLine: { lineStyle: { color: COLORS.line + '60', type: 'dashed' } },
+      axisLabel: { color: COLORS.textSec, fontSize: 11 }
+    }
+  };
+}
+
+function initChart(id) {
+  const dom = document.getElementById(id);
+  if (!dom) return null;
+  if (charts[id]) { charts[id].dispose(); }
+  const c = echarts.init(dom, null, { renderer: 'canvas' });
+  charts[id] = c;
+  return c;
+}
+
+// ============================================================
+//  CHART 1: Plays Trend
+// ============================================================
+function renderPlaysTrend() {
+  const c = initChart('chart-plays-trend');
+  if (!c || videoData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
+  opt.yAxis.name = '播放量';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  opt.series = [{
+    name: '播放量',
+    type: 'line',
+    data: videoData.map(r => num(r['播放量'])),
+    smooth: true,
+    symbol: 'circle',
+    symbolSize: 8,
+    lineStyle: { color: COLORS.pink, width: 3 },
+    itemStyle: { color: COLORS.pink, borderColor: '#fff', borderWidth: 2 },
+    areaStyle: {
+      color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: COLORS.pink + '50' },
+        { offset: 1, color: COLORS.pink + '05' }
+      ])
+    },
+    label: { show: true, position: 'top', color: COLORS.pink, fontSize: 11, formatter: p => formatNum(p.value) }
+  }];
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 2: Audience Comparison
+// ============================================================
+function renderAudience() {
+  const c = initChart('chart-audience');
+  if (!c || videoData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
+  opt.yAxis.name = '%';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  opt.tooltip.formatter = function(ps) {
+    let s = ps[0].axisValueLabel + '<br/>';
+    ps.forEach(p => { s += `${p.marker} ${p.seriesName}: <b>${p.value}%</b><br/>`; });
+    return s;
+  };
+  opt.series = [
+    {
+      name: '游客播放占比',
+      type: 'line',
+      data: videoData.map(r => pctToNum(r['游客播放占比'])),
+      smooth: true,
+      symbol: 'diamond',
+      symbolSize: 8,
+      lineStyle: { color: COLORS.orange, width: 2 },
+      itemStyle: { color: COLORS.orange }
+    },
+    {
+      name: '粉丝观看率',
+      type: 'line',
+      data: videoData.map(r => pctToNum(r['粉丝观看率'])),
+      smooth: true,
+      symbol: 'diamond',
+      symbolSize: 8,
+      lineStyle: { color: COLORS.blue, width: 2 },
+      itemStyle: { color: COLORS.blue }
+    }
+  ];
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 3: CTR Rating
+// ============================================================
+function renderCTR() {
+  const c = initChart('chart-ctr');
+  if (!c || videoData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
+  opt.yAxis.name = '星';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  opt.yAxis.max = 5;
+  opt.yAxis.min = 0;
+  opt.yAxis.interval = 1;
+  opt.tooltip.formatter = p => `${p.axisValueLabel}<br/>${p.marker} 封标点击率: <b>${p.value}星</b>`;
+  opt.series = [{
+    name: '封标点击率',
+    type: 'bar',
+    data: videoData.map(r => starToNum(r['封标点击率'])),
+    barWidth: '40%',
+    itemStyle: {
+      borderRadius: [6, 6, 0, 0],
+      color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+        { offset: 0, color: COLORS.yellow },
+        { offset: 1, color: COLORS.orange }
+      ])
+    },
+    label: { show: true, position: 'top', color: COLORS.yellow, formatter: p => p.value + '星' }
+  }];
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 4: Bounce Rate vs Avg Progress (Dual Y)
+// ============================================================
+function renderBounceProgress() {
+  const c = initChart('chart-bounce-progress');
+  if (!c || videoData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
+  opt.yAxis = [
+    {
+      type: 'value', name: '跳出率%', nameTextStyle: { color: COLORS.textSec },
+      axisLine: { show: false },
+      splitLine: { lineStyle: { color: COLORS.line + '60', type: 'dashed' } },
+      axisLabel: { color: COLORS.textSec, fontSize: 11 }
+    },
+    {
+      type: 'value', name: '播放进度%', nameTextStyle: { color: COLORS.textSec },
+      axisLine: { show: false },
+      splitLine: { show: false },
+      axisLabel: { color: COLORS.textSec, fontSize: 11 }
+    }
+  ];
+  opt.tooltip.formatter = function(ps) {
+    let s = ps[0].axisValueLabel + '<br/>';
+    ps.forEach(p => { s += `${p.marker} ${p.seriesName}: <b>${p.value}%</b><br/>`; });
+    return s;
+  };
+  opt.series = [
+    {
+      name: '3秒跳出率',
+      type: 'line',
+      yAxisIndex: 0,
+      data: videoData.map(r => pctToNum(r['3秒跳出率'])),
+      smooth: true,
+      symbol: 'circle', symbolSize: 8,
+      lineStyle: { color: COLORS.red, width: 2 },
+      itemStyle: { color: COLORS.red }
+    },
+    {
+      name: '平均播放进度',
+      type: 'line',
+      yAxisIndex: 1,
+      data: videoData.map(r => pctToNum(r['平均播放进度'])),
+      smooth: true,
+      symbol: 'circle', symbolSize: 8,
+      lineStyle: { color: COLORS.green, width: 2 },
+      itemStyle: { color: COLORS.green }
+    }
+  ];
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 5: Interaction 6D Bar
+// ============================================================
+function renderInteraction() {
+  const c = initChart('chart-interaction');
+  if (!c || videoData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
+  const metrics = [
+    { key: '点赞量', name: '点赞', color: COLORS.pink },
+    { key: '评论量', name: '评论', color: COLORS.blue },
+    { key: '弹幕量', name: '弹幕', color: COLORS.cyan },
+    { key: '收藏量', name: '收藏', color: COLORS.purple },
+    { key: '投币量', name: '投币', color: COLORS.yellow },
+    { key: '转发量', name: '转发', color: COLORS.green }
+  ];
+  opt.series = metrics.map(m => ({
+    name: m.name,
+    type: 'bar',
+    stack: 'interact',
+    data: videoData.map(r => num(r[m.key])),
+    itemStyle: { color: m.color },
+    barWidth: '45%',
+    emphasis: { itemStyle: { shadowBlur: 10, shadowColor: m.color + '80' } }
+  }));
+  opt.tooltip.trigger = 'axis';
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 6: Funnel
+// ============================================================
+function renderFunnel() {
+  const c = initChart('chart-funnel');
+  if (!c || videoData.length === 0) return;
+  const totalPlays = videoData.reduce((s, r) => s + num(r['播放量']), 0);
+  const avgBounce = videoData.reduce((s, r) => s + pctToNum(r['3秒跳出率']), 0) / videoData.length;
+  const avgProgress = videoData.reduce((s, r) => s + pctToNum(r['平均播放进度']), 0) / videoData.length;
+  const avgInteract = videoData.reduce((s, r) => s + pctToNum(r['互动率']), 0) / videoData.length;
+  const totalGain = videoData.reduce((s, r) => s + num(r['涨粉量']), 0);
+
+  const after3s = Math.round(totalPlays * (1 - avgBounce / 100));
+  const deepWatch = Math.round(totalPlays * avgProgress / 100);
+  const interacted = Math.round(totalPlays * avgInteract / 100);
+
+  const opt = {
+    backgroundColor: 'transparent',
+    tooltip: {
+      trigger: 'item',
+      backgroundColor: 'rgba(22,27,34,0.95)',
+      borderColor: COLORS.line,
+      textStyle: { color: COLORS.text, fontSize: 12 },
+      formatter: p => `${p.name}<br/>数量: <b>${formatNum(p.value)}</b><br/>占比: <b>${p.percent}%</b>`
+    },
+    series: [{
+      type: 'funnel',
+      left: '10%',
+      top: 20,
+      bottom: 20,
+      width: '80%',
+      min: 0,
+      max: totalPlays,
+      minSize: '10%',
+      maxSize: '100%',
+      sort: 'descending',
+      gap: 4,
+      label: {
+        show: true, position: 'inside', color: '#fff', fontSize: 13, fontWeight: 600,
+        formatter: p => `${p.name}\n${formatNum(p.value)}`
+      },
+      itemStyle: { borderWidth: 0, borderRadius: 4 },
+      data: [
+        { value: totalPlays, name: '总播放', itemStyle: { color: COLORS.pink } },
+        { value: after3s, name: '3秒留存', itemStyle: { color: COLORS.orange } },
+        { value: deepWatch, name: '深度观看', itemStyle: { color: COLORS.yellow } },
+        { value: interacted, name: '产生互动', itemStyle: { color: COLORS.blue } },
+        { value: totalGain, name: '新增粉丝', itemStyle: { color: COLORS.green } }
+      ]
+    }]
+  };
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 6B: Per-Video Funnel Comparison
+// ============================================================
+function renderVideoFunnel() {
+  const c = initChart('chart-video-funnel');
+  if (!c || videoData.length === 0) return;
+
+  const titles = videoData.map(r => abbrTitle(r['视频标题'], 6));
+  const retention = videoData.map(r => (100 - pctToNum(r['3秒跳出率'])).toFixed(1));
+  const progress = videoData.map(r => pctToNum(r['平均播放进度']).toFixed(1));
+  const interact = videoData.map(r => pctToNum(r['互动率']).toFixed(1));
+  const gainRate = videoData.map(r => {
+    var p = num(r['播放量']);
+    return p > 0 ? (num(r['涨粉量']) / p * 100).toFixed(2) : 0;
+  });
+
+  var opt = baseOption();
+  opt.xAxis.data = titles;
+  opt.xAxis.axisLabel = { color: COLORS.textSec, fontSize: 10, rotate: 30 };
+  opt.yAxis.name = '%';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  opt.yAxis.max = 100;
+  opt.tooltip.formatter = function(ps) {
+    var s = ps[0].axisValueLabel + '<br/>';
+    ps.forEach(function(p) { s += p.marker + ' ' + p.seriesName + ': <b>' + p.value + '%</b><br/>'; });
+    return s;
+  };
+  opt.legend = { textStyle: { color: COLORS.textSec, fontSize: 10 }, top: 0 };
+  opt.series = [
+    { name: '3秒留存率', type: 'bar', data: retention, barGap: '5%', barWidth: '16%',
+      itemStyle: { color: COLORS.green, borderRadius: [4,4,0,0] } },
+    { name: '平均播放进度', type: 'bar', data: progress, barWidth: '16%',
+      itemStyle: { color: COLORS.blue, borderRadius: [4,4,0,0] } },
+    { name: '互动率', type: 'bar', data: interact, barWidth: '16%',
+      itemStyle: { color: COLORS.purple, borderRadius: [4,4,0,0] } },
+    { name: '播转粉率', type: 'bar', data: gainRate, barWidth: '16%',
+      itemStyle: { color: COLORS.orange, borderRadius: [4,4,0,0] } },
+  ];
+  c.setOption(opt);
+
+  var tbody = document.getElementById('tbody-video-funnel');
+  if (!tbody) return;
+  var html = '';
+  videoData.forEach(function(r) {
+    var ret = (100 - pctToNum(r['3秒跳出率'])).toFixed(0);
+    var prog = pctToNum(r['平均播放进度']).toFixed(0);
+    var itr = pctToNum(r['互动率']).toFixed(1);
+    var p = num(r['播放量']);
+    var gr = p > 0 ? (num(r['涨粉量']) / p * 100).toFixed(2) : '0';
+    var score = _videoScore(ret, prog, itr, gr);
+    html += '<tr style="border-bottom:1px solid ' + COLORS.line + ';">' +
+      '<td style="padding:6px 10px;color:var(--text-primary);font-weight:500;">' + abbrTitle(r['视频标题'], 15) + '</td>' +
+      '<td style="padding:6px 10px;">' + formatNum(p) + '</td>' +
+      '<td style="padding:6px 10px;">' + _colorCell(ret, 70, 50) + '</td>' +
+      '<td style="padding:6px 10px;">' + _colorCell(prog, 35, 20) + '</td>' +
+      '<td style="padding:6px 10px;">' + _colorCell(itr, 6, 3) + '</td>' +
+      '<td style="padding:6px 10px;">' + formatNum(num(r['涨粉量'])) + ' (' + gr + '%)</td>' +
+      '<td style="padding:6px 10px;font-weight:600;">' + score + '</td>' +
+      '</tr>';
+  });
+  tbody.innerHTML = html;
+}
+
+function _colorCell(val, good, warn) {
+  var n = parseFloat(val);
+  var color = n >= good ? COLORS.green : n >= warn ? COLORS.yellow : COLORS.red;
+  return '<span style="color:' + color + ';font-weight:600;">' + val + '%</span>';
+}
+
+function _videoScore(retention, progress, interact, gainRate) {
+  var s = 0;
+  var r = parseFloat(retention), p = parseFloat(progress), i = parseFloat(interact), g = parseFloat(gainRate);
+  if (r >= 70) s += 2; else if (r >= 50) s += 1;
+  if (p >= 35) s += 2; else if (p >= 20) s += 1;
+  if (i >= 6) s += 2; else if (i >= 3) s += 1;
+  if (g >= 1.5) s += 2; else if (g >= 0.5) s += 1;
+  var grades = ['❌','⚠️','🟡','✅','🌟'];
+  return grades[Math.min(s, 4)] + ' ' + s + '/8';
+}
+
+// ============================================================
+//  CHART 7: History Plays & Fans (Dual Y)
+// ============================================================
+function renderHistoryPlaysFans() {
+  const c = initChart('chart-history-plays-fans');
+  if (!c || historyData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = historyData.map(r => {
+    const t = r['时间'];
+    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+  });
+  opt.yAxis = [
+    {
+      type: 'value', name: '播放量', nameTextStyle: { color: COLORS.textSec },
+      axisLine: { show: false },
+      splitLine: { lineStyle: { color: COLORS.line + '60', type: 'dashed' } },
+      axisLabel: { color: COLORS.textSec, fontSize: 11 }
+    },
+    {
+      type: 'value', name: '粉丝数', nameTextStyle: { color: COLORS.textSec },
+      axisLine: { show: false },
+      splitLine: { show: false },
+      axisLabel: { color: COLORS.textSec, fontSize: 11 }
+    }
+  ];
+  opt.series = [
+    {
+      name: '播放量',
+      type: 'line',
+      yAxisIndex: 0,
+      data: historyData.map(r => num(r['播放量'])),
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { color: COLORS.pink, width: 2 },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: COLORS.pink + '30' },
+          { offset: 1, color: COLORS.pink + '05' }
+        ])
+      }
+    },
+    {
+      name: '累计粉丝',
+      type: 'line',
+      yAxisIndex: 1,
+      data: historyData.map(r => num(r['累计粉丝'])),
+      smooth: true,
+      symbol: 'none',
+      lineStyle: { color: COLORS.blue, width: 2 }
+    }
+  ];
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 8: Daily Additions
+// ============================================================
+function renderDailyAdd() {
+  const c = initChart('chart-daily-add');
+  if (!c || historyData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = historyData.map(r => {
+    const t = r['时间'];
+    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+  });
+  opt.yAxis.name = '数量';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  const metrics = [
+    { key: '点赞', color: COLORS.pink },
+    { key: '收藏', color: COLORS.purple },
+    { key: '硬币', color: COLORS.yellow },
+    { key: '评论', color: COLORS.blue },
+    { key: '弹幕', color: COLORS.cyan },
+    { key: '分享', color: COLORS.green }
+  ];
+  opt.series = metrics.map(m => ({
+    name: m.name,
+    type: 'bar',
+    stack: 'daily',
+    data: historyData.map(r => num(r[m.key])),
+    itemStyle: { color: m.color },
+    barWidth: '60%'
+  }));
+  c.setOption(opt);
+}
+
+// ============================================================
+//  CHART 9: Interaction Trend
+// ============================================================
+function renderInteractionTrend() {
+  const c = initChart('chart-interaction-trend');
+  if (!c || historyData.length === 0) return;
+  const opt = baseOption();
+  opt.xAxis.data = historyData.map(r => {
+    const t = r['时间'];
+    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+  });
+  opt.yAxis.name = '数量';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
+  const metrics = [
+    { key: '点赞', color: COLORS.pink },
+    { key: '收藏', color: COLORS.purple },
+    { key: '硬币', color: COLORS.yellow },
+    { key: '评论', color: COLORS.blue }
+  ];
+  opt.series = metrics.map(m => ({
+    name: m.name,
+    type: 'line',
+    data: historyData.map(r => num(r[m.key])),
+    smooth: true,
+    symbol: 'none',
+    lineStyle: { color: m.color, width: 2 }
+  }));
+  c.setOption(opt);
+}
+
+// ============================================================
+//  RENDER ALL
+// ============================================================
+function renderAll() {
+  updateOverview();
+  renderPlaysTrend();
+  renderAudience();
+  renderCTR();
+  renderBounceProgress();
+  renderInteraction();
+  renderFunnel();
+  renderVideoFunnel();
+  renderHistoryPlaysFans();
+  renderDailyAdd();
+  renderInteractionTrend();
+  updateRefreshTime();
+}
+
+// ============================================================
+//  AUTO REFRESH
+// ============================================================
+function updateRefreshTime() {
+  const now = new Date();
+  const pad = n => String(n).padStart(2, '0');
+  document.getElementById('last-refresh').textContent =
+    `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  countdownValue = 60;
+}
+
+function startAutoRefresh() {
+  if (refreshTimer) clearInterval(refreshTimer);
+  refreshTimer = setInterval(() => {
+    countdownValue--;
+    if (countdownValue <= 0) {
+      countdownValue = 60;
+      if (isAutoMode) {
+        refreshData();
+      } else {
+        renderAll();
+      }
+      showToast('数据已自动刷新', 'success');
+    }
+    document.getElementById('countdown').textContent = countdownValue + 's';
+  }, 1000);
+}
+
+// ============================================================
+//  CSV UPLOAD HANDLERS
+// ============================================================
+document.getElementById('csv-videos').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    videoData = parseCSV(ev.target.result);
+    if (videoData.length === 0) {
+      showToast('CSV解析失败，请检查格式', 'error');
+      return;
+    }
+    isAutoMode = false;
+    renderAll();
+    showToast(`已加载 ${videoData.length} 条稿件数据`, 'success');
+  };
+  reader.readAsText(file, 'UTF-8');
+  e.target.value = '';
+});
+
+var csvHistoryEl = document.getElementById('csv-history');
+if (csvHistoryEl) {
+  csvHistoryEl.addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = function(ev) {
+    historyData = parseCSV(ev.target.result);
+    if (historyData.length === 0) {
+      showToast('CSV解析失败，请检查格式', 'error');
+      return;
+    }
+    isAutoMode = false;
+    renderAll();
+    showToast(`已加载 ${historyData.length} 天历史数据`, 'success');
+  };
+  reader.readAsText(file, 'UTF-8');
+  e.target.value = '';
+});
+}
+
+// ============================================================
+//  API INTERACTIONS
+// ============================================================
+async function loadCSVFromAPI() {
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 5000);
+
+    const vResp = await fetch('/api/data/videos', { signal: ctrl.signal });
+    clearTimeout(timeout);
+    if (vResp.ok) {
+      const text = await vResp.text();
+      if (text && text.trim()) {
+        var parsed = parseCSV(text);
+        if (parsed.length > 0) {
+          videoData = parsed;
+          showToast(`已加载 ${videoData.length} 条视频数据`, 'success');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('视频数据API加载失败:', e.message);
+  }
+
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 5000);
+
+    const hResp = await fetch('/api/data/history', { signal: ctrl.signal });
+    clearTimeout(timeout);
+    if (hResp.ok) {
+      const text = await hResp.text();
+      if (text && text.trim()) {
+        var parsed = parseCSV(text);
+        if (parsed.length > 0) {
+          historyData = parsed;
+          showToast(`已加载 ${historyData.length} 天历史数据`, 'success');
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('历史数据API加载失败:', e.message);
+  }
+
+  if (videoData.length === 0) {
+    videoData = parseCSV(DEFAULT_VIDEO_CSV);
+  }
+  if (historyData.length === 0) {
+    historyData = parseCSV(DEFAULT_HISTORY_CSV);
+  }
+
+  renderAll();
+
+  if (videoData.length > 0 && videoData[0]['视频标题'] !== '视频A-科技测评') {
+    isAutoMode = true;
+    loadAnalysis();
+  }
+}
+
+async function loadAnalysis() {
+  const statusEl = document.getElementById('ai-status');
+  const displayEl = document.getElementById('ai-display');
+  try {
+    const ctrl = new AbortController();
+    const timeout = setTimeout(() => ctrl.abort(), 5000);
+    const resp = await fetch('/api/analysis', { signal: ctrl.signal });
+    clearTimeout(timeout);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data.markdown) {
+        const html = renderMarkdown(data.markdown);
+        displayEl.innerHTML = html;
+        displayEl.classList.add('active');
+        if (statusEl) statusEl.textContent = '分析完成 ✅';
+      } else {
+        displayEl.innerHTML = '<p style="color:var(--text-muted);">暂无分析结果，请点击「重新分析」</p>';
+        if (statusEl) statusEl.textContent = '暂无分析数据';
+      }
+    } else {
+      if (statusEl) statusEl.textContent = '分析服务不可用';
+    }
+  } catch (e) {
+    displayEl.innerHTML = '<p style="color:var(--text-muted);">请通过 main.py 启动服务以获取自动分析</p>';
+    if (statusEl) statusEl.textContent = '离线模式';
+  }
+}
+
+function runAnalysis() {
+  const statusEl = document.getElementById('ai-status');
+  if (statusEl) statusEl.textContent = '分析中...';
+  const btn = document.getElementById('btn-analyze');
+  if (btn) { btn.disabled = true; btn.textContent = '分析中...'; }
+
+  fetch('/api/refresh')
+    .then(r => r.json())
+    .then(data => {
+      if (data.ok) {
+        showToast('智能分析完成', 'success');
+        loadAnalysis();
+      } else {
+        showToast('分析失败: ' + (data.message || '未知错误'), 'error');
+      }
+    })
+    .catch(() => {
+      showToast('分析服务不可用，请通过 main.py 启动', 'error');
+    })
+    .finally(() => {
+      if (btn) { btn.disabled = false; btn.textContent = '重新分析'; }
+    });
+}
+
+function refreshData() {
+  const btn = document.getElementById('btn-refresh');
+  if (btn) { btn.disabled = true; btn.textContent = '刷新中...'; }
+  showToast('正在刷新数据...', 'info');
+
+  loadCSVFromAPI().then(() => {
+    if (btn) { btn.disabled = false; btn.textContent = '刷新数据'; }
+    updateRefreshTime();
+    countdownValue = 60;
+  });
+}
+
+function triggerDownload() {
+  const btn = document.getElementById('btn-download');
+  if (btn) { btn.disabled = true; btn.textContent = '启动中...'; }
+  showToast('正在启动浏览器下载数据（首次需扫码，后续自动复用cookie）...', 'info');
+
+  fetch('/api/download')
+    .then(r => r.json())
+    .then(data => {
+      if (data.running) {
+        showToast('下载已启动！请在浏览器窗口中扫码登录B站', 'success');
+        pollDownloadStatus(btn);
+      } else if (data.message) {
+        showToast('下载任务: ' + data.message, 'info');
+        if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+      } else {
+        showToast('下载启动失败', 'error');
+        if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+      }
+    })
+    .catch(() => {
+      showToast('下载服务不可用，请在终端运行: python main.py --download', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+    });
+}
+
+function pollDownloadStatus(btn) {
+  var count = 0;
+  var maxPolls = 240;
+  var interval = setInterval(function() {
+    count++;
+    fetch('/api/download-status')
+      .then(r => r.json())
+      .then(s => {
+        if (btn) {
+          var dots = '.'.repeat((count % 3) + 1);
+          btn.textContent = '下载中' + dots;
+        }
+        if (!s.running) {
+          clearInterval(interval);
+          if (s.ok) {
+            showToast('数据下载完成，正在刷新看板...', 'success');
+            setTimeout(function() {
+              refreshData();
+              if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+            }, 1500);
+          } else {
+            showToast('下载失败: ' + (s.message || '未知错误'), 'error');
+            if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+          }
+        } else if (count >= maxPolls) {
+          clearInterval(interval);
+          showToast('下载超时（超过2分钟），请检查浏览器窗口', 'error');
+          if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+        }
+      })
+      .catch(function() {
+        clearInterval(interval);
+        if (btn) { btn.disabled = false; btn.textContent = '下载数据'; }
+      });
+  }, 500);
+}
+
+// ============================================================
+//  SWITCH ACCOUNT
+// ============================================================
+function switchAccount() {
+  var btn = document.getElementById('btn-switch');
+  if (!confirm('切换账号将清除当前账号的登录状态。\n\n清除后请点击「下载数据」扫码登录新账号。\n\n确定要继续吗？')) {
+    return;
+  }
+
+  if (btn) { btn.disabled = true; btn.textContent = '清除中...'; }
+  showToast('正在清除旧账号Cookie...', 'info');
+
+  fetch('/api/switch-account')
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (data.ok) {
+        showToast('Cookie已清除，请点击「下载数据」扫码登录新B站账号', 'success');
+      } else {
+        showToast('清除失败: ' + (data.message || '未知错误'), 'error');
+      }
+    })
+    .catch(function() {
+      showToast('服务不可用，请在终端运行: python main.py', 'error');
+    })
+    .finally(function() {
+      if (btn) { btn.disabled = false; btn.textContent = '切换账号'; }
+    });
+}
+
+// ============================================================
+//  AI ANALYSIS (RENDER)
+// ============================================================
+function renderMarkdown(text) {
+  let html = text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^### (.*$)/gm, '<h3>$1</h3>')
+    .replace(/^## (.*$)/gm, '<h3>$1</h3>')
+    .replace(/^# (.*$)/gm, '<h3>$1</h3>')
+    .replace(/^- (.*$)/gm, '<li>$1</li>')
+    .replace(/^\d+\. (.*$)/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+    .replace(/\n\n/g, '</p><p>')
+    .replace(/\n/g, '<br/>');
+  html = '<p>' + html + '</p>';
+  html = html.replace(/<p><\/p>/g, '');
+  html = html.replace(/<p>(<h3>)/g, '$1');
+  html = html.replace(/(<\/h3>)<\/p>/g, '$1');
+  html = html.replace(/<p>(<ul>)/g, '$1');
+  html = html.replace(/(<\/ul>)<\/p>/g, '$1');
+  return html;
+}
+
+function renderAIAdvice() {
+  const input = document.getElementById('ai-input').value.trim();
+  if (!input) {
+    showToast('请先输入或粘贴分析建议内容', 'error');
+    return;
+  }
+  const display = document.getElementById('ai-display');
+  display.innerHTML = renderMarkdown(input);
+  display.classList.add('active');
+  showToast('分析建议已渲染', 'success');
+}
+
+function clearAIAdvice() {
+  document.getElementById('ai-input').value = '';
+  const display = document.getElementById('ai-display');
+  display.innerHTML = '<p style="color:var(--text-muted);">已清空，点击「重新分析」获取自动分析</p>';
+}
+
+async function pasteFromClipboard() {
+  try {
+    const text = await navigator.clipboard.readText();
+    document.getElementById('ai-input').value = text;
+    showToast('已从剪贴板粘贴', 'success');
+  } catch (err) {
+    showToast('无法读取剪贴板，请手动粘贴 (Ctrl+V)', 'error');
+  }
+}
+
+// ============================================================
+//  EXPORT
+// ============================================================
+function exportDashboard() {
+  showToast('正在生成图片，请稍候...', 'info');
+  const dashboard = document.getElementById('dashboard');
+  dashboard.classList.add('exporting');
+  html2canvas(dashboard, {
+    backgroundColor: '#0d1117',
+    scale: 2,
+    useCORS: true,
+    logging: false,
+    windowWidth: 1440
+  }).then(canvas => {
+    dashboard.classList.remove('exporting');
+    const link = document.createElement('a');
+    link.download = 'bilibili-dashboard-' + new Date().toISOString().slice(0, 10) + '.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+    showToast('看板已导出为图片', 'success');
+  }).catch(err => {
+    dashboard.classList.remove('exporting');
+    showToast('导出失败: ' + err.message, 'error');
+  });
+}
+
+// ============================================================
+//  RESIZE
+// ============================================================
+window.addEventListener('resize', () => {
+  Object.values(charts).forEach(c => { if (c && !c.isDisposed()) c.resize(); });
+});
+
+// ============================================================
+//  INIT
+// ============================================================
+window.addEventListener('DOMContentLoaded', () => {
+  window.onScriptsReady = function() {
+    setTimeout(() => {
+      document.getElementById('loading-overlay').classList.add('hidden');
+      document.querySelector('.dashboard-container').classList.add('visible');
+    }, 400);
+
+    loadCSVFromAPI().then(() => {
+      startAutoRefresh();
+    });
+  };
+});
+</script>
+</body>
+</html>
