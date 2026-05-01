@@ -19,6 +19,9 @@ task_plan.md
 findings.md
 progress.md
 
+# Agent Skills（本地工具集，不上传）
+skills/
+
 # Python
 __pycache__/
 *.py[cod]

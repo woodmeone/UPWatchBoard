@@ -264,25 +264,55 @@ def parse_video_csv(csv_path: str) -> list:
         return []
     with open(csv_path, "r", encoding="utf-8-sig") as f:
         reader = csv.DictReader(f)
+        fieldnames = reader.fieldnames or []
+        has_ctr = "封标点击率" in fieldnames
+        has_bounce = "3秒跳出率" in fieldnames
+        has_interact = "互动率" in fieldnames
         rows = []
         for r in reader:
             try:
+                plays = _num(r.get("播放量", 0))
+                likes = _num(r.get("点赞量", 0))
+                comments = _num(r.get("评论量", 0))
+                danmaku = _num(r.get("弹幕量", 0))
+                favorites = _num(r.get("收藏量", 0))
+                coins = _num(r.get("投币量", 0))
+                shares = _num(r.get("转发量", 0))
+
+                if has_interact:
+                    interact_rate = _pct(r.get("互动率", 0))
+                elif plays > 0:
+                    total_interact = likes + comments + danmaku + favorites + coins + shares
+                    interact_rate = total_interact / plays * 100
+                else:
+                    interact_rate = 0.0
+
+                if has_ctr:
+                    ctr_star = _star(r.get("封标点击率", 0))
+                else:
+                    ctr_star = -1.0
+
+                if has_bounce:
+                    bounce_3s = _pct(r.get("3秒跳出率", 0))
+                else:
+                    bounce_3s = -1.0
+
                 rows.append(VideoRecord(
                     title=r.get("视频标题", "").strip(),
                     publish_time=r.get("发布时间", "").strip(),
-                    plays=_num(r.get("播放量", 0)),
+                    plays=plays,
                     visitor_play_pct=_pct(r.get("游客播放占比", 0)),
                     fan_view_rate=_pct(r.get("粉丝观看率", 0)),
-                    ctr_star=_star(r.get("封标点击率", 0)),
-                    bounce_3s=_pct(r.get("3秒跳出率", 0)),
-                    interact_rate=_pct(r.get("互动率", 0)),
+                    ctr_star=ctr_star,
+                    bounce_3s=bounce_3s,
+                    interact_rate=interact_rate,
                     gain_fans=_num(r.get("涨粉量", 0)),
-                    likes=_num(r.get("点赞量", 0)),
-                    comments=_num(r.get("评论量", 0)),
-                    danmaku=_num(r.get("弹幕量", 0)),
-                    favorites=_num(r.get("收藏量", 0)),
-                    coins=_num(r.get("投币量", 0)),
-                    shares=_num(r.get("转发量", 0)),
+                    likes=likes,
+                    comments=comments,
+                    danmaku=danmaku,
+                    favorites=favorites,
+                    coins=coins,
+                    shares=shares,
                     avg_progress=_pct(r.get("平均播放进度", 0)),
                 ))
             except Exception:
@@ -298,8 +328,11 @@ def parse_history_csv(csv_path: str) -> list:
         rows = []
         for r in reader:
             try:
+                date_val = r.get("时间", "").strip()
+                if "累计" in date_val or date_val == "":
+                    continue
                 rows.append(HistoryRecord(
-                    date=r.get("时间", "").strip(),
+                    date=date_val,
                     plays=_num(r.get("播放量", 0)),
                     fans=_num(r.get("累计粉丝", 0)),
                     likes=_num(r.get("点赞", 0)),
@@ -388,27 +421,43 @@ class DataAnalyzer:
         traffic = min(100, max(0, traffic))
 
         # === 维度2：内容吸引力 (25%) ===
-        ctr_scores = []
-        for v in videos:
-            if v.ctr_star >= 4:
-                ctr_scores.append(100)
-            elif v.ctr_star >= 3:
-                ctr_scores.append(60)
-            else:
-                ctr_scores.append(30)
-        avg_ctr = sum(ctr_scores) / n
+        ctr_available = any(v.ctr_star >= 0 for v in videos)
+        bounce_available = any(v.bounce_3s >= 0 for v in videos)
 
-        bounce_scores = []
-        for v in videos:
-            if v.bounce_3s < 30:
-                bounce_scores.append(100)
-            elif v.bounce_3s <= 40:
-                bounce_scores.append(60)
-            else:
-                bounce_scores.append(30)
-        avg_bounce = sum(bounce_scores) / n
+        if ctr_available:
+            ctr_scores = []
+            for v in videos:
+                if v.ctr_star >= 4:
+                    ctr_scores.append(100)
+                elif v.ctr_star >= 3:
+                    ctr_scores.append(60)
+                elif v.ctr_star >= 0:
+                    ctr_scores.append(30)
+            avg_ctr = sum(ctr_scores) / len(ctr_scores) if ctr_scores else 60
+        else:
+            avg_ctr = 60
 
-        content_appeal = (avg_ctr * 0.6 + avg_bounce * 0.4)
+        if bounce_available:
+            bounce_scores = []
+            for v in videos:
+                if 0 <= v.bounce_3s < 30:
+                    bounce_scores.append(100)
+                elif 0 <= v.bounce_3s <= 40:
+                    bounce_scores.append(60)
+                elif v.bounce_3s >= 0:
+                    bounce_scores.append(30)
+            avg_bounce = sum(bounce_scores) / len(bounce_scores) if bounce_scores else 60
+        else:
+            avg_bounce = 60
+
+        if ctr_available and bounce_available:
+            content_appeal = (avg_ctr * 0.6 + avg_bounce * 0.4)
+        elif ctr_available:
+            content_appeal = avg_ctr
+        elif bounce_available:
+            content_appeal = avg_bounce
+        else:
+            content_appeal = 60
         content_appeal = min(100, content_appeal)
 
         # === 维度3：内容质量 (25%) ===
@@ -616,9 +665,11 @@ class DataAnalyzer:
         best_plays = max(videos, key=lambda v: v.plays)
         highlight.append(f"播放量最高的视频「{best_plays.title}」达 {_format_num(best_plays.plays)} 次播放")
 
-        best_ctr = max(videos, key=lambda v: v.ctr_star)
-        if best_ctr.ctr_star >= 4:
-            highlight.append(f"「{best_ctr.title}」封标点击率达 {best_ctr.ctr_star:.1f}星，封面标题表现优秀")
+        ctr_available = any(v.ctr_star >= 0 for v in videos)
+        if ctr_available:
+            best_ctr = max(videos, key=lambda v: v.ctr_star)
+            if best_ctr.ctr_star >= 4:
+                highlight.append(f"「{best_ctr.title}」封标点击率达 {best_ctr.ctr_star:.1f}星，封面标题表现优秀")
 
         best_interact = max(videos, key=lambda v: v.interact_rate)
         if best_interact.interact_rate > 5:
@@ -638,14 +689,18 @@ class DataAnalyzer:
 
     def _find_issues(self, videos: list) -> list:
         issues = []
+        bounce_available = any(v.bounce_3s >= 0 for v in videos)
+        ctr_available = any(v.ctr_star >= 0 for v in videos)
 
-        worst_bounce = max(videos, key=lambda v: v.bounce_3s)
-        if worst_bounce.bounce_3s > 30:
-            issues.append(f"「{worst_bounce.title}」3秒跳出率达 {worst_bounce.bounce_3s:.0f}%，视频开头吸引力不足")
+        if bounce_available:
+            worst_bounce = max(videos, key=lambda v: v.bounce_3s)
+            if worst_bounce.bounce_3s > 30:
+                issues.append(f"「{worst_bounce.title}」3秒跳出率达 {worst_bounce.bounce_3s:.0f}%，视频开头吸引力不足")
 
-        worst_ctr = min(videos, key=lambda v: v.ctr_star)
-        if worst_ctr.ctr_star < 3.5:
-            issues.append(f"「{worst_ctr.title}」封标点击率仅 {worst_ctr.ctr_star:.1f}星，封面和标题需优化")
+        if ctr_available:
+            worst_ctr = min(videos, key=lambda v: v.ctr_star if v.ctr_star >= 0 else 5)
+            if worst_ctr.ctr_star < 3.5:
+                issues.append(f"「{worst_ctr.title}」封标点击率仅 {worst_ctr.ctr_star:.1f}星，封面和标题需优化")
 
         worst_progress = min(videos, key=lambda v: v.avg_progress)
         if worst_progress.avg_progress < 25:
@@ -656,10 +711,12 @@ class DataAnalyzer:
             issues.append(f"「{worst_interact.title}」互动率仅 {worst_interact.interact_rate:.1f}%，缺乏互动引导")
 
         n = len(videos)
-        if n >= 2:
-            avg_bounce = sum(v.bounce_3s for v in videos) / n
-            if avg_bounce > 35:
-                issues.append(f"整体平均跳出率 {avg_bounce:.0f}% 偏高，需系统性优化视频开头")
+        if n >= 2 and bounce_available:
+            valid_bounce = [v.bounce_3s for v in videos if v.bounce_3s >= 0]
+            if valid_bounce:
+                avg_bounce = sum(valid_bounce) / len(valid_bounce)
+                if avg_bounce > 35:
+                    issues.append(f"整体平均跳出率 {avg_bounce:.0f}% 偏高，需系统性优化视频开头")
 
         return issues[:4]
 
@@ -680,9 +737,13 @@ class DataAnalyzer:
         if scores.fan_conversion < 50:
             suggestions.append("**互动引导优化**（涨粉转化弱）：在视频中自然引导一键三连和关注；设置开放性讨论话题引导评论；强化个人品牌辨识度，做系列化内容提升粉丝粘性")
 
-        avg_bounce = sum(v.bounce_3s for v in videos) / len(videos) if videos else 0
-        if avg_bounce > 35:
-            suggestions.append("**针对性降低跳出率**：建议排查视频开头3秒画面是否吸引力不足、是否与封面承诺一致；可尝试将最精彩片段前置，制造期待感")
+        bounce_available = any(v.bounce_3s >= 0 for v in videos)
+        if bounce_available:
+            valid_bounce = [v.bounce_3s for v in videos if v.bounce_3s >= 0]
+            if valid_bounce:
+                avg_bounce = sum(valid_bounce) / len(valid_bounce)
+                if avg_bounce > 35:
+                    suggestions.append("**针对性降低跳出率**：建议排查视频开头3秒画面是否吸引力不足、是否与封面承诺一致；可尝试将最精彩片段前置，制造期待感")
 
         avg_progress = sum(v.avg_progress for v in videos) / len(videos) if videos else 0
         if avg_progress < 30:

@@ -925,7 +925,7 @@ body {
     </div>
     <div class="overview-card">
       <div class="card-icon orange">&#9888;</div>
-      <div class="card-label">平均跳出率</div>
+      <div class="card-label">平均播放进度</div>
       <div class="card-value orange" id="ov-bounce">--</div>
     </div>
     <div class="overview-card">
@@ -951,11 +951,11 @@ body {
         <div class="chart-container" id="chart-audience"></div>
       </div>
       <div class="chart-card">
-        <div class="chart-title">封标点击率评分</div>
+        <div class="chart-title">平均播放进度</div>
         <div class="chart-container" id="chart-ctr"></div>
       </div>
       <div class="chart-card">
-        <div class="chart-title">3秒跳出率 vs 平均播放进度</div>
+        <div class="chart-title">互动率 vs 播转粉率</div>
         <div class="chart-container" id="chart-bounce-progress"></div>
       </div>
       <div class="chart-card full-width">
@@ -963,7 +963,7 @@ body {
         <div class="chart-container" id="chart-interaction"></div>
       </div>
       <div class="chart-card full-width">
-        <div class="chart-title">流量漏斗分析（聚合）</div>
+        <div class="chart-title">互动数据分布（聚合）</div>
         <div class="chart-container tall" id="chart-funnel"></div>
       </div>
       <div class="chart-card full-width">
@@ -974,7 +974,6 @@ body {
             <thead><tr style="border-bottom:1px solid var(--border-color);text-align:left;">
               <th style="padding:6px 10px;">视频</th>
               <th style="padding:6px 10px;">播放量</th>
-              <th style="padding:6px 10px;">3秒留存</th>
               <th style="padding:6px 10px;">播放进度</th>
               <th style="padding:6px 10px;">互动率</th>
               <th style="padding:6px 10px;">涨粉</th>
@@ -1131,12 +1130,12 @@ let isAutoMode = true;
 // ============================================================
 //  DEFAULT DEMO DATA (ALL FICTIONAL)
 // ============================================================
-const DEFAULT_VIDEO_CSV = `视频标题,发布时间,播放量,游客播放占比,粉丝观看率,封标点击率,3秒跳出率,互动率,涨粉量,点赞量,评论量,弹幕量,收藏量,投币量,转发量,平均播放进度
-视频A-科技测评,2026年03月01日 12:00:00,8500,88.5%,3.2%,4.2星,25.3%,6.8%,45,320,28,15,180,42,18,38.5%
-视频B-生活vlog,2026年03月05日 18:30:00,5200,91.2%,2.8%,3.8星,30.1%,5.2%,22,180,15,8,95,25,12,32.1%
-视频C-教程分享,2026年03月10日 10:00:00,12300,85.3%,4.5%,4.5星,18.7%,9.5%,128,580,45,22,420,85,35,52.3%
-视频D-美食制作,2026年03月15日 20:00:00,3800,93.1%,2.1%,3.5星,35.8%,4.1%,8,95,12,5,42,15,6,28.7%
-视频E-游戏实况,2026年03月20日 22:00:00,9100,87.6%,3.8%,4.0星,22.4%,7.2%,56,280,32,18,150,38,22,41.2%`;
+const DEFAULT_VIDEO_CSV = `视频标题,发布时间,播放量,游客播放占比,粉丝观看率,涨粉量,点赞量,评论量,弹幕量,收藏量,投币量,转发量,平均播放进度
+视频A-科技测评,2026年03月01日 12:00:00,8500,88.5%,3.2%,45,320,28,15,180,42,18,38.5%
+视频B-生活vlog,2026年03月05日 18:30:00,5200,91.2%,2.8%,22,180,15,8,95,25,12,32.1%
+视频C-教程分享,2026年03月10日 10:00:00,12300,85.3%,4.5%,128,580,45,22,420,85,35,52.3%
+视频D-美食制作,2026年03月15日 20:00:00,3800,93.1%,2.1%,8,95,12,5,42,15,6,28.7%
+视频E-游戏实况,2026年03月20日 22:00:00,9100,87.6%,3.8%,56,280,32,18,150,38,22,41.2%`;
 
 function generateDefaultHistory() {
   const rows = ['时间,播放量,累计粉丝,点赞,收藏,硬币,评论,弹幕,分享'];
@@ -1193,6 +1192,13 @@ function starToNum(s) {
   return parseFloat(String(s).replace('星', '')) || 0;
 }
 
+function calcInteractRate(r) {
+  var plays = num(r['播放量']);
+  if (plays === 0) return 0;
+  var total = num(r['点赞量']) + num(r['评论量']) + num(r['弹幕量']) + num(r['收藏量']) + num(r['投币量']) + num(r['转发量']);
+  return (total / plays * 100);
+}
+
 function abbrTitle(title, maxLen) {
   maxLen = maxLen || 8;
   if (title.length <= maxLen) return title;
@@ -1222,10 +1228,9 @@ function updateOverview() {
   const totalPlays = videoData.reduce((s, r) => s + num(r['播放量']), 0);
   const totalFans = videoData.reduce((s, r) => s + num(r['涨粉量']), 0);
   const count = videoData.length;
-  const avgInteract = count > 0 ? (videoData.reduce((s, r) => s + pctToNum(r['互动率']), 0) / count).toFixed(1) : 0;
-  const avgBounce = count > 0 ? (videoData.reduce((s, r) => s + pctToNum(r['3秒跳出率']), 0) / count).toFixed(1) : 0;
+  const avgInteract = count > 0 ? (videoData.reduce((s, r) => s + calcInteractRate(r), 0) / count).toFixed(1) : 0;
+  const avgProgress = count > 0 ? (videoData.reduce((s, r) => s + pctToNum(r['平均播放进度']), 0) / count).toFixed(1) : 0;
 
-  // Get latest fans from history if available
   let latestFans = totalFans;
   if (historyData.length > 0) {
     const lastRow = historyData[historyData.length - 1];
@@ -1236,7 +1241,7 @@ function updateOverview() {
   document.getElementById('ov-fans').textContent = formatNum(latestFans);
   document.getElementById('ov-count').textContent = count;
   document.getElementById('ov-interact').textContent = avgInteract + '%';
-  document.getElementById('ov-bounce').textContent = avgBounce + '%';
+  document.getElementById('ov-bounce').textContent = avgProgress + '%';
   document.getElementById('ov-gain').textContent = '+' + formatNum(totalFans);
 }
 
@@ -1365,58 +1370,44 @@ function renderAudience() {
 }
 
 // ============================================================
-//  CHART 3: CTR Rating
+//  CHART 3: Average Play Progress (replaces CTR star rating)
 // ============================================================
-function renderCTR() {
+function renderProgress() {
   const c = initChart('chart-ctr');
   if (!c || videoData.length === 0) return;
   const opt = baseOption();
   opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
-  opt.yAxis.name = '星';
+  opt.yAxis.name = '%';
   opt.yAxis.nameTextStyle = { color: COLORS.textSec };
-  opt.yAxis.max = 5;
-  opt.yAxis.min = 0;
-  opt.yAxis.interval = 1;
-  opt.tooltip.formatter = p => `${p.axisValueLabel}<br/>${p.marker} 封标点击率: <b>${p.value}星</b>`;
+  opt.yAxis.max = 100;
+  opt.tooltip.formatter = p => `${p.axisValueLabel}<br/>${p.marker} 平均播放进度: <b>${p.value}%</b>`;
   opt.series = [{
-    name: '封标点击率',
+    name: '平均播放进度',
     type: 'bar',
-    data: videoData.map(r => starToNum(r['封标点击率'])),
+    data: videoData.map(r => pctToNum(r['平均播放进度'])),
     barWidth: '40%',
     itemStyle: {
       borderRadius: [6, 6, 0, 0],
       color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
-        { offset: 0, color: COLORS.yellow },
-        { offset: 1, color: COLORS.orange }
+        { offset: 0, color: COLORS.cyan },
+        { offset: 1, color: COLORS.blue }
       ])
     },
-    label: { show: true, position: 'top', color: COLORS.yellow, formatter: p => p.value + '星' }
+    label: { show: true, position: 'top', color: COLORS.cyan, formatter: p => p.value + '%' }
   }];
   c.setOption(opt);
 }
 
 // ============================================================
-//  CHART 4: Bounce Rate vs Avg Progress (Dual Y)
+//  CHART 4: Interact Rate (replaces bounce rate which is unavailable)
 // ============================================================
 function renderBounceProgress() {
   const c = initChart('chart-bounce-progress');
   if (!c || videoData.length === 0) return;
   const opt = baseOption();
   opt.xAxis.data = videoData.map(r => abbrTitle(r['视频标题']));
-  opt.yAxis = [
-    {
-      type: 'value', name: '跳出率%', nameTextStyle: { color: COLORS.textSec },
-      axisLine: { show: false },
-      splitLine: { lineStyle: { color: COLORS.line + '60', type: 'dashed' } },
-      axisLabel: { color: COLORS.textSec, fontSize: 11 }
-    },
-    {
-      type: 'value', name: '播放进度%', nameTextStyle: { color: COLORS.textSec },
-      axisLine: { show: false },
-      splitLine: { show: false },
-      axisLabel: { color: COLORS.textSec, fontSize: 11 }
-    }
-  ];
+  opt.yAxis.name = '%';
+  opt.yAxis.nameTextStyle = { color: COLORS.textSec };
   opt.tooltip.formatter = function(ps) {
     let s = ps[0].axisValueLabel + '<br/>';
     ps.forEach(p => { s += `${p.marker} ${p.seriesName}: <b>${p.value}%</b><br/>`; });
@@ -1424,20 +1415,27 @@ function renderBounceProgress() {
   };
   opt.series = [
     {
-      name: '3秒跳出率',
+      name: '互动率',
       type: 'line',
-      yAxisIndex: 0,
-      data: videoData.map(r => pctToNum(r['3秒跳出率'])),
+      data: videoData.map(r => calcInteractRate(r).toFixed(1)),
       smooth: true,
       symbol: 'circle', symbolSize: 8,
-      lineStyle: { color: COLORS.red, width: 2 },
-      itemStyle: { color: COLORS.red }
+      lineStyle: { color: COLORS.purple, width: 3 },
+      itemStyle: { color: COLORS.purple },
+      areaStyle: {
+        color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color: COLORS.purple + '40' },
+          { offset: 1, color: COLORS.purple + '05' }
+        ])
+      }
     },
     {
-      name: '平均播放进度',
+      name: '播转粉率',
       type: 'line',
-      yAxisIndex: 1,
-      data: videoData.map(r => pctToNum(r['平均播放进度'])),
+      data: videoData.map(r => {
+        var p = num(r['播放量']);
+        return p > 0 ? (num(r['涨粉量']) / p * 100).toFixed(2) : 0;
+      }),
       smooth: true,
       symbol: 'circle', symbolSize: 8,
       lineStyle: { color: COLORS.green, width: 2 },
@@ -1477,20 +1475,18 @@ function renderInteraction() {
 }
 
 // ============================================================
-//  CHART 6: Funnel
+//  CHART 6: Funnel (computed from available data)
 // ============================================================
 function renderFunnel() {
   const c = initChart('chart-funnel');
   if (!c || videoData.length === 0) return;
   const totalPlays = videoData.reduce((s, r) => s + num(r['播放量']), 0);
-  const avgBounce = videoData.reduce((s, r) => s + pctToNum(r['3秒跳出率']), 0) / videoData.length;
-  const avgProgress = videoData.reduce((s, r) => s + pctToNum(r['平均播放进度']), 0) / videoData.length;
-  const avgInteract = videoData.reduce((s, r) => s + pctToNum(r['互动率']), 0) / videoData.length;
+  const totalLikes = videoData.reduce((s, r) => s + num(r['点赞量']), 0);
+  const totalComments = videoData.reduce((s, r) => s + num(r['评论量']), 0);
+  const totalFavorites = videoData.reduce((s, r) => s + num(r['收藏量']), 0);
+  const totalCoins = videoData.reduce((s, r) => s + num(r['投币量']), 0);
+  const totalShares = videoData.reduce((s, r) => s + num(r['转发量']), 0);
   const totalGain = videoData.reduce((s, r) => s + num(r['涨粉量']), 0);
-
-  const after3s = Math.round(totalPlays * (1 - avgBounce / 100));
-  const deepWatch = Math.round(totalPlays * avgProgress / 100);
-  const interacted = Math.round(totalPlays * avgInteract / 100);
 
   const opt = {
     backgroundColor: 'transparent',
@@ -1520,9 +1516,11 @@ function renderFunnel() {
       itemStyle: { borderWidth: 0, borderRadius: 4 },
       data: [
         { value: totalPlays, name: '总播放', itemStyle: { color: COLORS.pink } },
-        { value: after3s, name: '3秒留存', itemStyle: { color: COLORS.orange } },
-        { value: deepWatch, name: '深度观看', itemStyle: { color: COLORS.yellow } },
-        { value: interacted, name: '产生互动', itemStyle: { color: COLORS.blue } },
+        { value: totalLikes, name: '点赞', itemStyle: { color: COLORS.purple } },
+        { value: totalFavorites, name: '收藏', itemStyle: { color: COLORS.blue } },
+        { value: totalCoins, name: '投币', itemStyle: { color: COLORS.yellow } },
+        { value: totalComments, name: '评论', itemStyle: { color: COLORS.cyan } },
+        { value: totalShares, name: '分享', itemStyle: { color: COLORS.orange } },
         { value: totalGain, name: '新增粉丝', itemStyle: { color: COLORS.green } }
       ]
     }]
@@ -1538,9 +1536,8 @@ function renderVideoFunnel() {
   if (!c || videoData.length === 0) return;
 
   const titles = videoData.map(r => abbrTitle(r['视频标题'], 6));
-  const retention = videoData.map(r => (100 - pctToNum(r['3秒跳出率'])).toFixed(1));
   const progress = videoData.map(r => pctToNum(r['平均播放进度']).toFixed(1));
-  const interact = videoData.map(r => pctToNum(r['互动率']).toFixed(1));
+  const interact = videoData.map(r => calcInteractRate(r).toFixed(1));
   const gainRate = videoData.map(r => {
     var p = num(r['播放量']);
     return p > 0 ? (num(r['涨粉量']) / p * 100).toFixed(2) : 0;
@@ -1559,14 +1556,12 @@ function renderVideoFunnel() {
   };
   opt.legend = { textStyle: { color: COLORS.textSec, fontSize: 10 }, top: 0 };
   opt.series = [
-    { name: '3秒留存率', type: 'bar', data: retention, barGap: '5%', barWidth: '16%',
-      itemStyle: { color: COLORS.green, borderRadius: [4,4,0,0] } },
-    { name: '平均播放进度', type: 'bar', data: progress, barWidth: '16%',
-      itemStyle: { color: COLORS.blue, borderRadius: [4,4,0,0] } },
-    { name: '互动率', type: 'bar', data: interact, barWidth: '16%',
+    { name: '平均播放进度', type: 'bar', data: progress, barGap: '5%', barWidth: '22%',
+      itemStyle: { color: COLORS.cyan, borderRadius: [4,4,0,0] } },
+    { name: '互动率', type: 'bar', data: interact, barWidth: '22%',
       itemStyle: { color: COLORS.purple, borderRadius: [4,4,0,0] } },
-    { name: '播转粉率', type: 'bar', data: gainRate, barWidth: '16%',
-      itemStyle: { color: COLORS.orange, borderRadius: [4,4,0,0] } },
+    { name: '播转粉率', type: 'bar', data: gainRate, barWidth: '22%',
+      itemStyle: { color: COLORS.green, borderRadius: [4,4,0,0] } },
   ];
   c.setOption(opt);
 
@@ -1574,16 +1569,14 @@ function renderVideoFunnel() {
   if (!tbody) return;
   var html = '';
   videoData.forEach(function(r) {
-    var ret = (100 - pctToNum(r['3秒跳出率'])).toFixed(0);
     var prog = pctToNum(r['平均播放进度']).toFixed(0);
-    var itr = pctToNum(r['互动率']).toFixed(1);
+    var itr = calcInteractRate(r).toFixed(1);
     var p = num(r['播放量']);
     var gr = p > 0 ? (num(r['涨粉量']) / p * 100).toFixed(2) : '0';
-    var score = _videoScore(ret, prog, itr, gr);
+    var score = _videoScoreNew(prog, itr, gr);
     html += '<tr style="border-bottom:1px solid ' + COLORS.line + ';">' +
       '<td style="padding:6px 10px;color:var(--text-primary);font-weight:500;">' + abbrTitle(r['视频标题'], 15) + '</td>' +
       '<td style="padding:6px 10px;">' + formatNum(p) + '</td>' +
-      '<td style="padding:6px 10px;">' + _colorCell(ret, 70, 50) + '</td>' +
       '<td style="padding:6px 10px;">' + _colorCell(prog, 35, 20) + '</td>' +
       '<td style="padding:6px 10px;">' + _colorCell(itr, 6, 3) + '</td>' +
       '<td style="padding:6px 10px;">' + formatNum(num(r['涨粉量'])) + ' (' + gr + '%)</td>' +
@@ -1599,12 +1592,11 @@ function _colorCell(val, good, warn) {
   return '<span style="color:' + color + ';font-weight:600;">' + val + '%</span>';
 }
 
-function _videoScore(retention, progress, interact, gainRate) {
+function _videoScoreNew(progress, interact, gainRate) {
   var s = 0;
-  var r = parseFloat(retention), p = parseFloat(progress), i = parseFloat(interact), g = parseFloat(gainRate);
-  if (r >= 70) s += 2; else if (r >= 50) s += 1;
-  if (p >= 35) s += 2; else if (p >= 20) s += 1;
-  if (i >= 6) s += 2; else if (i >= 3) s += 1;
+  var p = parseFloat(progress), i = parseFloat(interact), g = parseFloat(gainRate);
+  if (p >= 35) s += 3; else if (p >= 20) s += 1;
+  if (i >= 6) s += 3; else if (i >= 3) s += 1;
   if (g >= 1.5) s += 2; else if (g >= 0.5) s += 1;
   var grades = ['❌','⚠️','🟡','✅','🌟'];
   return grades[Math.min(s, 4)] + ' ' + s + '/8';
@@ -1619,7 +1611,10 @@ function renderHistoryPlaysFans() {
   const opt = baseOption();
   opt.xAxis.data = historyData.map(r => {
     const t = r['时间'];
-    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    if (t.includes('年')) return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    const parts = t.split('/');
+    if (parts.length === 3) return parts[1] + '/' + parts[2];
+    return t.length > 8 ? t.slice(-8) : t;
   });
   opt.yAxis = [
     {
@@ -1673,7 +1668,10 @@ function renderDailyAdd() {
   const opt = baseOption();
   opt.xAxis.data = historyData.map(r => {
     const t = r['时间'];
-    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    if (t.includes('年')) return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    const parts = t.split('/');
+    if (parts.length === 3) return parts[1] + '/' + parts[2];
+    return t.length > 8 ? t.slice(-8) : t;
   });
   opt.yAxis.name = '数量';
   opt.yAxis.nameTextStyle = { color: COLORS.textSec };
@@ -1705,7 +1703,10 @@ function renderInteractionTrend() {
   const opt = baseOption();
   opt.xAxis.data = historyData.map(r => {
     const t = r['时间'];
-    return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    if (t.includes('年')) return t.replace(/^\d{4}年/, '').replace(/日$/, '');
+    const parts = t.split('/');
+    if (parts.length === 3) return parts[1] + '/' + parts[2];
+    return t.length > 8 ? t.slice(-8) : t;
   });
   opt.yAxis.name = '数量';
   opt.yAxis.nameTextStyle = { color: COLORS.textSec };
@@ -1733,7 +1734,7 @@ function renderAll() {
   updateOverview();
   renderPlaysTrend();
   renderAudience();
-  renderCTR();
+  renderProgress();
   renderBounceProgress();
   renderInteraction();
   renderFunnel();
@@ -1848,6 +1849,7 @@ async function loadCSVFromAPI() {
       const text = await hResp.text();
       if (text && text.trim()) {
         var parsed = parseCSV(text);
+        parsed = parsed.filter(function(r) { return !(r['时间'] || '').includes('累计'); });
         if (parsed.length > 0) {
           historyData = parsed;
           showToast(`已加载 ${historyData.length} 天历史数据`, 'success');
